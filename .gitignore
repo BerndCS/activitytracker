@@ -1,5 +1,7 @@
-[Bb]in/
-[Ob]j/
+**/bin/
+**/obj/
+**/build/
+**/dist/
 *.exe
 *.dll
 *.pdb

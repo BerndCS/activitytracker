@@ -1,11 +1,15 @@
 import sys
 import os
 import sqlite3
+import subprocess
+import psutil
 import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, 
                              QWidget, QVBoxLayout, QTableWidget, 
-                             QTableWidgetItem, QLabel, QHeaderView)
-from PyQt6.QtCore import Qt
+                             QTableWidgetItem, QLabel, QHeaderView,
+                             QSystemTrayIcon, QMenu)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QIcon, QAction
 
 
 BLACKLIST = [
@@ -21,7 +25,6 @@ class ActivityApp(QMainWindow):
         self.setWindowTitle("Activitytracker Dashboard")
         self.resize(1100, 750)
 
-        # Tabs erstellen
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
@@ -33,11 +36,66 @@ class ActivityApp(QMainWindow):
         self.setup_log_tab()
         self.tabs.addTab(self.log_tab, "Protokoll Verlauf")
 
+        self.setup_system_tray()
+
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.refresh_data)
+        self.update_timer.start(5000)
+
         self.refresh_data()
 
     def get_db_path(self):
         appdata = os.getenv('APPDATA')
         return os.path.join(appdata, 'TraceTime', 'activity_log.db')
+
+    def setup_system_tray(self):
+        self.tray_icon = QSystemTrayIcon(self)
+        
+        self.tray_icon.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon))
+
+        self.tray_icon.setToolTip("ActivityTracker")
+        
+        self.tray_menu = QMenu()
+        
+        show_action = QAction("Anzeigen", self)
+        show_action.triggered.connect(self.show_from_tray)
+        self.tray_menu.addAction(show_action)
+        
+        self.tray_menu.addSeparator()
+        
+        exit_action = QAction("Beenden", self)
+        exit_action.triggered.connect(self.quit_application)
+        self.tray_menu.addAction(exit_action)
+        
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.show()
+    
+    def show_from_tray(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+    
+    def quit_application(self):
+        """Beendet Dashboard und Collector-Prozess."""
+        self.stop_collector()
+        QApplication.quit()
+    
+    def stop_collector(self):
+        """Sucht und beendet den TraceTimeCollector-Prozess."""
+        try:
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if proc.info['name'].lower() == 'tracetimecollector.exe':
+                        proc.terminate()
+                        proc.wait(timeout=3) 
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+                    pass
+        except Exception:
+            pass 
+    
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
 
     def setup_stats_tab(self):
         layout = QVBoxLayout()
@@ -109,10 +167,16 @@ class ActivityApp(QMainWindow):
             self.table.setItem(i, 0, QTableWidgetItem(str(row['AppName'])))
             self.table.setItem(i, 1, QTableWidgetItem(str(row['Action'])))
             self.table.setItem(i, 2, QTableWidgetItem(str(row['Timestamp'])))
-
+        
+    
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion") 
     window = ActivityApp()
-    window.show()
+    
+    if "--minimized" in sys.argv:
+        window.hide()
+    else:
+        window.show()
+    
     sys.exit(app.exec())
