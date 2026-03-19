@@ -17,6 +17,18 @@ internal static class Program
 
     private static string _lastApp = "";
     private static System.Threading.Timer? _timer;
+    private static readonly object _lock = new();
+
+    // Prozesse, die nicht als aktive Nutzung gewertet werden sollen
+    private static readonly HashSet<string> Blacklist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "activitytracker_app.exe", "python.exe", "pythonw.exe",
+        "tracetimecollector.exe",
+        "conhost.exe", "dllhost.exe", "runtimebroker.exe", "svchost.exe",
+        "searchhost.exe", "shellexperiencehost.exe", "taskhostw.exe",
+        "dwm.exe", "fontdrvhost.exe", "lsass.exe", "csrss.exe",
+        "smss.exe", "wininit.exe", "services.exe", "winlogon.exe"
+    };
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
@@ -38,11 +50,16 @@ internal static class Program
 
         _timer = new System.Threading.Timer(TrackFocus, null, 0, 5000);
 
+        // Beim Beenden letzten STOP schreiben
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
+
         new ManualResetEvent(false).WaitOne();
     }
 
     private static void TrackFocus(object? state)
     {
+        // Lock verhindert, dass zwei Timer-Callbacks gleichzeitig laufen
+        if (!Monitor.TryEnter(_lock)) return;
         try
         {
             IntPtr handle = GetForegroundWindow();
@@ -51,6 +68,9 @@ internal static class Program
             GetWindowThreadProcessId(handle, out uint pid);
             using var proc = Process.GetProcessById((int)pid);
             string currentApp = proc.ProcessName + ".exe";
+
+            // Blacklist: System- und eigene Prozesse ignorieren
+            if (Blacklist.Contains(currentApp)) return;
 
             if (currentApp != _lastApp)
             {
@@ -66,6 +86,22 @@ internal static class Program
             }
         }
         catch { }
+        finally
+        {
+            Monitor.Exit(_lock);
+        }
+    }
+
+    private static void Shutdown()
+    {
+        _timer?.Dispose();
+        lock (_lock)
+        {
+            if (!string.IsNullOrEmpty(_lastApp))
+            {
+                InsertLog(_lastApp, "STOP", DateTime.UtcNow);
+            }
+        }
     }
 
     private static void InitializeDatabase()

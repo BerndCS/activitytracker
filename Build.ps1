@@ -1,6 +1,8 @@
 
 param(
-    [switch]$Clean = $false
+    [switch]$Clean = $false,
+    [switch]$CreateReleaseBundle = $false,
+    [string]$BundleName = "activitytracker_bundle.zip"
 )
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -90,3 +92,22 @@ Write-Host "`n📌 Nächste Schritte:" -ForegroundColor Yellow
 Write-Host "  1. Teste beide .exe-Dateien im dist-Ordner" -ForegroundColor White
 Write-Host "  2. Führe das Autostart-Skript aus: .\Create-AutostartShortcut.ps1" -ForegroundColor White
 Write-Host "  3. Oder erstelle einen Installer mit NSIS/WiX" -ForegroundColor White
+
+if ($CreateReleaseBundle) {
+    Write-Host "`n[Optional] Erstelle Release-Bundle..." -ForegroundColor Yellow
+    $BundlePath = Join-Path $DistDir $BundleName
+    $StageDir = Join-Path $BuildDir "release_bundle"
+
+    if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
+
+    Copy-Item (Join-Path $DistDir "activitytracker_app.exe") $StageDir -Force
+    Copy-Item (Join-Path $DistDir "TraceTimeCollector.exe") $StageDir -Force
+
+    if (Test-Path $BundlePath) {
+        Remove-Item $BundlePath -Force
+    }
+
+    Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $BundlePath -Force
+    Write-Host "✓ Release-Bundle erstellt: $BundlePath" -ForegroundColor Green
+}

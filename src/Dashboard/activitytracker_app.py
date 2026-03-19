@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import psutil
 import pandas as pd
+from datetime import datetime, timezone
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, 
                              QWidget, QVBoxLayout, QTableWidget, 
                              QTableWidgetItem, QLabel, QHeaderView,
@@ -13,10 +14,12 @@ from PyQt6.QtGui import QIcon, QAction
 
 
 BLACKLIST = [
-    'conhost.exe', 'dllhost.exe', 'RuntimeBroker.exe', 'svchost.exe', 
+    'conhost.exe', 'dllhost.exe', 'RuntimeBroker.exe', 'svchost.exe',
     'SearchHost.exe', 'ShellExperienceHost.exe', 'taskhostw.exe',
     'wmpnetwk.exe', 'lsass.exe', 'csrss.exe', 'smss.exe', 'wininit.exe',
-    'services.exe', 'winlogon.exe', 'fontdrvhost.exe', 'dwm.exe'
+    'services.exe', 'winlogon.exe', 'fontdrvhost.exe', 'dwm.exe',
+    # Eigene Prozesse ausblenden
+    'python.exe', 'pythonw.exe', 'activitytracker_app.exe', 'TraceTimeCollector.exe'
 ]
 
 class ActivityApp(QMainWindow):
@@ -40,7 +43,7 @@ class ActivityApp(QMainWindow):
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.refresh_data)
-        self.update_timer.start(5000)
+        self.update_timer.start(500)
 
         self.refresh_data()
 
@@ -125,10 +128,14 @@ class ActivityApp(QMainWindow):
         self.log_tab.setLayout(layout)
 
     def calculate_durations(self, df):
-        """Rechnet START/STOP Paare in Minuten um (wie im Dashboard)"""
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+        """Rechnet START/STOP Paare in Minuten um.
+        Offene Sessions (START ohne STOP) werden bis jetzt gezählt.
+        Sessions kürzer als 1 Sekunde werden als Messartefakte ignoriert.
+        """
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
         df = df.sort_values(['AppName', 'Timestamp'])
-        
+        now = datetime.now(timezone.utc)
+
         app_durations = {}
         for app, group in df.groupby('AppName'):
             start_time = None
@@ -137,12 +144,20 @@ class ActivityApp(QMainWindow):
                 if row['Action'] == 'START':
                     start_time = row['Timestamp']
                 elif row['Action'] == 'STOP' and start_time is not None:
-                    total_seconds += (row['Timestamp'] - start_time).total_seconds()
+                    delta = (row['Timestamp'] - start_time).total_seconds()
+                    if delta >= 1:  # Messartefakte unter 1 Sekunde ignorieren
+                        total_seconds += delta
                     start_time = None
-            
+
+            # Offene Session (läuft noch): bis jetzt zählen
+            if start_time is not None:
+                delta = (now - start_time).total_seconds()
+                if delta >= 1:
+                    total_seconds += delta
+
             if total_seconds > 0:
                 app_durations[app] = round(total_seconds / 60, 2)
-        
+
         return pd.Series(app_durations).sort_values(ascending=False)
 
     def refresh_data(self):

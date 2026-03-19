@@ -26,11 +26,37 @@ Das Skript:
 - ✓ Konvertiert Python → .exe mit PyInstaller
 - ✓ Baut C# Collector
 - ✓ Legt beide .exe im `dist`-Ordner ab
+- ✓ Optional: Erstellt ein Release-Bundle für GitHub RCs
 
 **Optional: Vollständiger Clean-Build**
 ```powershell
 .\Build.ps1 -Clean
 ```
+
+**Optional: Release-Bundle für GitHub erstellen**
+```powershell
+.\Build.ps1 -Clean -CreateReleaseBundle
+```
+
+Dadurch entsteht im `dist`-Ordner die Datei `activitytracker_bundle.zip`, die als Asset in einen GitHub Release Candidate hochgeladen werden kann.
+
+## Update aus GitHub Release Candidate
+
+Das Update-Skript lädt den neuesten Release Candidate (Tag enthält `rc`) von GitHub, ersetzt beide EXE-Dateien und startet das Programm neu.
+
+```powershell
+.\Update.ps1 -RepoOwner <owner> -RepoName <repo>
+```
+
+Beispiel:
+```powershell
+.\Update.ps1 -RepoOwner larsc -RepoName activitytracker
+```
+
+Hinweise:
+- Das Skript sucht standardmäßig nach dem Asset `activitytracker_bundle.zip`.
+- Die Datenbank bleibt erhalten, da sie unter `%APPDATA%\TraceTime\activity_log.db` liegt.
+- Falls kein RC gefunden wird, wird auf Wunsch der letzte stabile Release verwendet.
 
 ### 3. Autostart einrichten
 
