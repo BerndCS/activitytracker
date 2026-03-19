@@ -15,11 +15,10 @@ internal static class Program
     private static readonly string DatabasePath = Path.Combine(DbFolder, DatabaseFileName);
     private static readonly string ConnectionString = $"Data Source={DatabasePath}";
 
-    private static string _lastApp = "";
+    private static readonly HashSet<string> ActiveApps = new(StringComparer.OrdinalIgnoreCase);
     private static System.Threading.Timer? _timer;
     private static readonly object _lock = new();
 
-    // Prozesse, die nicht als aktive Nutzung gewertet werden sollen
     private static readonly HashSet<string> Blacklist = new(StringComparer.OrdinalIgnoreCase)
     {
         "activitytracker_app.exe", "python.exe", "pythonw.exe",
@@ -29,12 +28,6 @@ internal static class Program
         "dwm.exe", "fontdrvhost.exe", "lsass.exe", "csrss.exe",
         "smss.exe", "wininit.exe", "services.exe", "winlogon.exe"
     };
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetConsoleWindow();
@@ -48,9 +41,13 @@ internal static class Program
         SetAutostart();
         InitializeDatabase();
 
+        lock (_lock)
+        {
+            RecordInitialRunningApps();
+        }
+
         _timer = new System.Threading.Timer(TrackFocus, null, 0, 5000);
 
-        // Beim Beenden letzten STOP schreiben
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
 
         new ManualResetEvent(false).WaitOne();
@@ -58,32 +55,10 @@ internal static class Program
 
     private static void TrackFocus(object? state)
     {
-        // Lock verhindert, dass zwei Timer-Callbacks gleichzeitig laufen
         if (!Monitor.TryEnter(_lock)) return;
         try
         {
-            IntPtr handle = GetForegroundWindow();
-            if (handle == IntPtr.Zero) return;
-
-            GetWindowThreadProcessId(handle, out uint pid);
-            using var proc = Process.GetProcessById((int)pid);
-            string currentApp = proc.ProcessName + ".exe";
-
-            // Blacklist: System- und eigene Prozesse ignorieren
-            if (Blacklist.Contains(currentApp)) return;
-
-            if (currentApp != _lastApp)
-            {
-                DateTime now = DateTime.UtcNow;
-
-                if (!string.IsNullOrEmpty(_lastApp))
-                {
-                    InsertLog(_lastApp, "STOP", now);
-                }
-
-                InsertLog(currentApp, "START", now);
-                _lastApp = currentApp;
-            }
+            SyncRunningApps();
         }
         catch { }
         finally
@@ -97,11 +72,78 @@ internal static class Program
         _timer?.Dispose();
         lock (_lock)
         {
-            if (!string.IsNullOrEmpty(_lastApp))
+            DateTime now = DateTime.UtcNow;
+            foreach (string app in ActiveApps)
             {
-                InsertLog(_lastApp, "STOP", DateTime.UtcNow);
+                InsertLog(app, "STOP", now);
+            }
+            ActiveApps.Clear();
+        }
+    }
+
+    private static void RecordInitialRunningApps()
+    {
+        DateTime now = DateTime.UtcNow;
+        foreach (string app in GetRunningApps())
+        {
+            ActiveApps.Add(app);
+            InsertLog(app, "START", now);
+        }
+    }
+
+    private static void SyncRunningApps()
+    {
+        DateTime now = DateTime.UtcNow;
+        HashSet<string> currentApps = GetRunningApps();
+
+        foreach (string app in currentApps)
+        {
+            if (!ActiveApps.Contains(app))
+            {
+                InsertLog(app, "START", now);
             }
         }
+
+        foreach (string app in ActiveApps)
+        {
+            if (!currentApps.Contains(app))
+            {
+                InsertLog(app, "STOP", now);
+            }
+        }
+
+        ActiveApps.Clear();
+        foreach (string app in currentApps)
+        {
+            ActiveApps.Add(app);
+        }
+    }
+
+    private static HashSet<string> GetRunningApps()
+    {
+        HashSet<string> apps = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Process process in Process.GetProcesses())
+        {
+            try
+            {
+                if (process.HasExited) continue;
+
+                string appName = process.ProcessName + ".exe";
+                if (Blacklist.Contains(appName)) continue;
+
+                apps.Add(appName);
+            }
+            catch
+            {
+                // Zugriff auf einzelne Prozesse kann fehlschlagen, wird ignoriert.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return apps;
     }
 
     private static void InitializeDatabase()

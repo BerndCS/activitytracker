@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import psutil
 import pandas as pd
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, 
                              QWidget, QVBoxLayout, QTableWidget, 
@@ -128,37 +129,45 @@ class ActivityApp(QMainWindow):
         self.log_tab.setLayout(layout)
 
     def calculate_durations(self, df):
-        """Rechnet START/STOP Paare in Minuten um.
-        Offene Sessions (START ohne STOP) werden bis jetzt gezählt.
-        Sessions kürzer als 1 Sekunde werden als Messartefakte ignoriert.
+        """Berechnet Nutzungszeiten pro App über START/STOP-Paare.
+
+        Die Logs können parallele Sessions verschiedener Apps enthalten.
+        Deshalb werden START/STOP-Ereignisse pro App separat gepaart.
         """
+        if df.empty:
+            return pd.Series(dtype=float)
+
+        df = df.copy()
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
-        df = df.sort_values(['AppName', 'Timestamp'])
+        df = df.sort_values('Timestamp').reset_index(drop=True)
         now = datetime.now(timezone.utc)
 
-        app_durations = {}
-        for app, group in df.groupby('AppName'):
-            start_time = None
-            total_seconds = 0
-            for _, row in group.iterrows():
-                if row['Action'] == 'START':
-                    start_time = row['Timestamp']
-                elif row['Action'] == 'STOP' and start_time is not None:
-                    delta = (row['Timestamp'] - start_time).total_seconds()
-                    if delta >= 1:  # Messartefakte unter 1 Sekunde ignorieren
-                        total_seconds += delta
-                    start_time = None
+        open_sessions = defaultdict(deque)
+        app_durations = defaultdict(float)
 
-            # Offene Session (läuft noch): bis jetzt zählen
-            if start_time is not None:
-                delta = (now - start_time).total_seconds()
+        for _, row in df.iterrows():
+            app = row['AppName']
+            action = row['Action']
+            ts = row['Timestamp']
+
+            if action == 'START':
+                open_sessions[app].append(ts)
+
+            elif action == 'STOP' and open_sessions[app]:
+                start_ts = open_sessions[app].popleft()
+                delta = (ts - start_ts).total_seconds()
                 if delta >= 1:
-                    total_seconds += delta
+                    app_durations[app] += delta
 
-            if total_seconds > 0:
-                app_durations[app] = round(total_seconds / 60, 2)
+        for app, starts in open_sessions.items():
+            while starts:
+                start_ts = starts.popleft()
+                delta = (now - start_ts).total_seconds()
+                if delta >= 1:
+                    app_durations[app] += delta
 
-        return pd.Series(app_durations).sort_values(ascending=False)
+        result = pd.Series(dict(app_durations)).sort_values(ascending=False)
+        return result.apply(lambda x: round(x / 60, 2))
 
     def refresh_data(self):
         db_path = self.get_db_path()
