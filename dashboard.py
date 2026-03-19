@@ -3,6 +3,13 @@ import pandas as pd
 import sqlite3
 import os
 
+BLACKLIST = [
+    'conhost.exe', 'dllhost.exe', 'RuntimeBroker.exe', 'svchost.exe', 
+    'SearchHost.exe', 'ShellExperienceHost.exe', 'taskhostw.exe',
+    'wmpnetwk.exe', 'lsass.exe', 'csrss.exe', 'smss.exe', 'wininit.exe',
+    'services.exe', 'winlogon.exe', 'fontdrvhost.exe', 'dwm.exe'
+]
+
 st.set_page_config(page_title="Activitytracker Dashboard", layout="wide")
 
 def get_db_connection():
@@ -26,6 +33,8 @@ with tab1:
     if conn is not None:
         df = pd.read_sql_query("SELECT * FROM Logs ORDER BY AppName, Timestamp", conn)
         conn.close()
+
+        df = df[~df['AppName'].isin(BLACKLIST)]
         
         if not df.empty:
             event_counts = df['AppName'].value_counts()
@@ -43,6 +52,9 @@ with tab2:
     if conn is not None:
         df_logs = pd.read_sql_query("SELECT Id, AppName, Action, Timestamp FROM Logs ORDER BY Timestamp DESC", conn)
         conn.close()
+
+        df_logs = df_logs[~df_logs['AppName'].isin(BLACKLIST)]
+
         st.dataframe(df_logs, use_container_width=True)
     else:
         st.info("Log ist leer, da keine Datenbank gefunden wurde.")
