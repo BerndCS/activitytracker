@@ -11,8 +11,9 @@ internal static class Program
 	private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 	private const string RunValueName = "TraceTimeCollector";
 
-	private static readonly string DatabasePath = Path.Combine(AppContext.BaseDirectory, DatabaseFileName);
-	private static readonly string ConnectionString = $"Data Source={DatabasePath}";
+    private static readonly string DbFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TraceTime");
+    private static readonly string DatabasePath = Path.Combine(DbFolder, DatabaseFileName);
+    private static readonly string ConnectionString = $"Data Source={DatabasePath}";
 
 	private static ManagementEventWatcher? _processStartWatcher;
 	private static ManagementEventWatcher? _processStopWatcher;
@@ -33,6 +34,8 @@ internal static class Program
 
 	private static void InitializeDatabase()
 	{
+        if (!Directory.Exists(DbFolder)) Directory.CreateDirectory(DbFolder);
+
 		using var connection = new SqliteConnection(ConnectionString);
 		connection.Open();
 
