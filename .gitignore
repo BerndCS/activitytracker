@@ -30,3 +30,6 @@ activity_log.db
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
+
+TraceTimeCollector/bin/
+TraceTimeCollector/obj/
